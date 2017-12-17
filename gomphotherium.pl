@@ -116,7 +116,7 @@ helper verify_user => sub {
 
 helper get_user => sub {
   my $c = shift;
-  my ($id) = @_;
+  my ($user_id) = @_; # the email address used as the user_id by oauth
   # id: The ID of the account
   # username: The username of the account
   # acct: Equals username for local users, includes @domain for remote ones
@@ -132,9 +132,9 @@ helper get_user => sub {
   # avatar_static: URL to the avatar static image (gif)
   # header: URL to the header image
   # header_static: URL to the header static image (gif)
-  my $sth = eval { $c->db->prepare('SELECT username FROM users WHERE user_id = ?') } || $log->fatal("Cannot select user from database");
-  $sth->execute($id);
-  my ($username) = $sth->fetchrow_array;
+  my $sth = eval { $c->db->prepare('SELECT id, username FROM users WHERE email = ?') } || $log->fatal("Cannot select user from database");
+  $sth->execute($user_id);
+  my ($id, $username) = $sth->fetchrow_array;
   my $user = {};
   $user->{id} = $id;
   $user->{username} = $username if $username;
@@ -173,7 +173,7 @@ helper get_refresh_token => sub {
 helper remove_access_token => sub {
   my $c = shift;
   my ($access_token) = @_;
-  my $sth = eval { $c->db->prepare('DELETE FROM access_token WHERE access_token = ?') } || $log->fatal("Cannot delete access_token from database");
+  my $sth = eval { $c->db->prepare('DELETE FROM access_tokens WHERE access_token = ?') } || $log->fatal("Cannot delete access_token from database");
   $sth->execute($access_token);
 };
 
@@ -298,7 +298,7 @@ my $verify_client_sub = sub { #FIXME
     }
   }
     
-  return ( 0,'unauthorized_client' );
+  return ( 0,'unauthorized_client2' );
 };
 
 my $store_auth_code_sub = sub { #FIXME
@@ -338,7 +338,7 @@ my $verify_auth_code_sub = sub { #FIXME
   my $client = $obj->db->get_collection( 'clients' )
       ->find_one({ client_id => $client_id });
 
-  $client || return ( 0,'unauthorized_client' );
+  $client || return ( 0,'unauthorized_client1' );
 
   if (
     ! $ac
@@ -380,13 +380,14 @@ my $store_access_token_sub = sub {
     # must have generated an access token via refresh token so revoke the old
     # access token and refresh token (also copy required data if missing)
     my $prev_rt = $c->get_refresh_token($old_refresh_token);
+    my $prev_at = $c->get_access_token($prev_rt->{access_token});
     # access tokens can be revoked, whilst refresh tokens can remain so we
     # need to get the data from the refresh token as the access token may
     # no longer exist at the point that the refresh token is used
     $scope //= $prev_rt->{scope};
     $user_id = $prev_rt->{user_id};
     # need to revoke the access token
-    $c->remove_access_token($prev_rt->{access_token});
+    $c->remove_access_token($prev_at->{access_token});
   } else {
     $user_id = $c->get_auth_code($auth_code)->{user_id};
   }
@@ -395,7 +396,7 @@ my $store_access_token_sub = sub {
     $scope  = $client->{scope};
     $client = $client->{client_id};
   }
-  # if the client has en existing refresh token we need to revoke it
+  # if the client has an existing refresh token we need to revoke it
   $c->remove_refresh_token($client, $user_id);
   # add new tokens
   $c->add_access_token($access_token, $scope, time + $expires_in, $refresh_token, $client, $user_id);
@@ -461,30 +462,6 @@ plugin 'OAuth2::Server' => {
   verify_user_password_cb      => $verify_user_password_sub,
 };
 
-# group {
-#   # /api - must be authorized
-#   under '/api' => sub {
-#     my ( $c ) = @_;
-
-#     return 1 if $c->oauth; # must be authorized via oauth
-
-#     $c->render( status => 401, text => 'Unauthorized' );
-#     return undef;
-#   };
-
-#   any '/annoy_friends' => sub { shift->render( text => "Annoyed Friends" ); };
-#   any '/post_image'    => sub { shift->render( text => "Posted Image" ); };
-# };
-
-# any '/track_location' => sub {
-#   my ( $c ) = @_;
-
-#   my $oauth_details = $c->oauth( 'track_location' )
-#       || return $c->render( status => 401, text => 'You cannot track location' );
-
-#   $c->render( text => "Target acquired: @{[$oauth_details->{user_id}]}" );
-# };
-
 get '/' => sub {
   my ($c) = @_;
   $c->render(text => "Gomphotherium is up");
@@ -523,8 +500,11 @@ post '/oauth/token' => sub {
 get '/api/v1/accounts/verify_credentials' => sub {
   my ($c) = @_;
   if (my $oauth_details = $c->oauth) {
-    $log->debug("authenticated!");
-    $c->render(json => {id => $oauth_details->{user_id}});
+    $log->debug($oauth_details->{user_id} . " authenticated!");
+    my $user = $c->get_user($oauth_details->{user_id});
+    $c->render(json => {
+      id => $user->{id},
+      username => $user->{username}});
   } else {
     $c->render(status => 401, text => 'Access denied');
   }

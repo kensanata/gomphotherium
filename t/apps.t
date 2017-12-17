@@ -45,7 +45,7 @@ my $hash	  = decode_json $t->tx->res->body;
 my $client_id	  = $hash->{client_id};
 my $client_secret = $hash->{client_secret};
 
-# curl -X POST -d "username=alex&email=kensanata@gmail.com&password=*secret*" -Ss http://localhost:3000/auth
+# curl -X POST -d "username=alex&email=alex@gnu.org&password=*secret*" -Ss http://localhost:3000/auth
 
 # create user
 $t->post_ok('/auth' => form => {
@@ -55,7 +55,7 @@ $t->post_ok('/auth' => form => {
   scopes => 'read'})
     ->status_is(200);
 
-# FIXME: make sure we can't register twice
+# make sure we can't register twice
 $t->post_ok('/auth' => form => {
   username => 'alex',
   email => 'alex@gnu.org',
@@ -63,10 +63,10 @@ $t->post_ok('/auth' => form => {
   scopes => 'read'})
     ->status_is(500);
 
-is($t->tx->res->body, 'User already exists');
+is($t->tx->res->body, 'User already exists', 'User already exists');
 
 # curl -X POST -d "client_id=CLIENT_ID_HERE&client_secret=CLIENT_SECRET_HERE&grant_type=password&username=YOUR_EMAIL&password=YOUR_PASSWORD" -Ss http://localhost:3000/oauth/token
-# curl -X POST -d "client_id=456106006&client_secret=1234&grant_type=password&username=kensanata@gmail.com&password=*secret*" -Ss http://localhost:3000/oauth/token
+# curl -X POST -d "client_id=456106006&client_secret=1234&grant_type=password&username=alex@gnu.org&password=*secret*" -Ss http://localhost:3000/oauth/token
 
 # authenticate using password
 $t->post_ok('/oauth/token' => form => {
@@ -83,7 +83,8 @@ $t->post_ok('/oauth/token' => form => {
 $hash		 = decode_json $t->tx->res->body;
 my $access_token = $hash->{access_token};
 
-# curl --header "Authorization: Bearer MTQ5MjgxNDQ5NS0zNTI5OTQtMC45OTMxODYwMDk5MzA0OTctSlBRanVqVDdzZzQzZ2dKS1MzcWo1WHp3MkFKUEs4" -sS http://localhost:3000/api/v1/accounts/verify_credentials
+# curl --header "Authorization: Bearer ACCESS_TOKEN_HERE" -sS http://localhost:3000/api/v1/accounts/verify_credentials
+# curl --header "Authorization: Bearer MTQ5MzI0NjExNy05NDQ0NC0wLjI5MjM2ODAyNTA0NDU3MS1PUlF6UDdrczg0SE5zNHRWMHNRVXV6c29tQWM4M28=" -sS http://localhost:3000/api/v1/accounts/verify_credentials
 
 $t->ua->on(start => sub {
   my ($ua, $tx) = @_;
@@ -94,5 +95,13 @@ $t->get_ok('/api/v1/accounts/verify_credentials')
     ->status_is(200)
     ->json_has('/id')
     ->json_has('/username');
+
+open(my $fh, '>:encoding(UTF-8)', 'test_credentials.txt') or die "Can't save credentials: $!";
+print $fh join " ", $client_id, $client_secret, $access_token;
+close($fh);
+
+$hash		 = decode_json $t->tx->res->body;
+is($hash->{username}, 'alex@gnu.org', "username is correct");
+is($hash->{id}, "1", "first user is no. 1");
 
 done_testing();
