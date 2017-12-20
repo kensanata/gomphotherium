@@ -471,6 +471,44 @@ plugin 'OAuth2::Server' => {
   verify_user_password_cb      => $verify_user_password_sub,
 };
 
+# statuses
+helper create_statuses_table => sub {
+  my $c = shift;
+  $c->db->do('CREATE TABLE IF NOT EXISTS statuses (id INTEGER PRIMARY KEY, user_id INTEGER, content TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)');
+};
+
+app->create_statuses_table;
+
+helper create_status => sub {
+  my $c = shift;
+  my ($user_id) = @_;
+  # status: The text of the status (mandatory)
+  # in_reply_to_id: local ID of the status you want to reply to
+  # media_ids: Array of media IDs to attach to the status (maximum 4)
+  # sensitive: Set this to mark the media of the status as NSFW
+  # spoiler_text: Text to be shown as a warning before the actual content
+  # visibility: Either "direct", "private", "unlisted" or "public"
+  my ($content) = $c->param('status');
+  
+  my $sth = eval { $dbh->prepare('INSERT INTO statuses (content, user_id) VALUES (?, ?)') } || $log->fatal("Cannot insert status into database");
+  $sth->execute($content, $user_id);
+  
+  $sth = eval { $dbh->prepare('SELECT last_insert_rowid()') } || $log->fatal("Cannot select last status id from database");
+  $sth->execute();
+  my ($status_id) = $sth->fetchrow_array;
+  
+  $sth = eval { $c->db->prepare('SELECT created_at FROM statuses WHERE id = ?') } || $log->fatal("Cannot select status from database");
+  $sth->execute($status_id);
+  my ($created_at) = $sth->fetchrow_array;
+  
+  my $status = {};
+  $status->{id} = $status_id;
+  $status->{content} = $content if $content;
+  $status->{created_at} = $created_at;
+  $status->{account} = $c->get_user($user_id);
+  return $status;
+};
+
 get '/' => sub {
   my ($c) = @_;
   $c->render(text => "Gomphotherium is up");
@@ -514,6 +552,16 @@ get '/api/v1/accounts/verify_credentials' => sub {
     $c->render(json => {
       id => $user->{id},
       username => $user->{username}});
+  } else {
+    $c->render(status => 401, text => 'Access denied');
+  }
+};
+
+post '/api/v1/statuses' => sub {
+  my ($c) = @_;
+  if (my $oauth_details = $c->oauth) {
+    $log->debug($oauth_details->{user_id} . " authenticated!");
+    $c->render(json => $c->create_status($oauth_details->{user_id}));
   } else {
     $c->render(status => 401, text => 'Access denied');
   }
