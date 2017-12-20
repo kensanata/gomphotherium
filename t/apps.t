@@ -101,7 +101,7 @@ print $fh join " ", $client_id, $client_secret, $access_token;
 close($fh);
 
 $hash		 = decode_json $t->tx->res->body;
-is($hash->{username}, 'alex@gnu.org', "username is correct");
+is($hash->{username}, 'alex', "username is correct");
 is($hash->{id}, "1", "first user is no. 1");
 
 done_testing();

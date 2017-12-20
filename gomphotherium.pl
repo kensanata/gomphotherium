@@ -108,15 +108,19 @@ helper verify_user => sub {
   my $c = shift;
   my ($username, $password) = @_;
   # strange but true: we are getting the email address in the username param
-  my $sth = eval { $c->db->prepare('SELECT password FROM users WHERE email = ?') } || $log->fatal("Cannot select user password from database");
+  my $sth = eval { $c->db->prepare('SELECT id, password FROM users WHERE email = ?') } || $log->fatal("Cannot select user password from database");
   $sth->execute($username);
-  my ($hash) = $sth->fetchrow_array;
-  return $pbkdf2->validate($hash, $password);
+  my ($id, $hash) = $sth->fetchrow_array;
+  if ($id && $hash && $pbkdf2->validate($hash, $password)) {
+    $c->stash(user_id => $id);
+    return 1
+  }
+  return 0;
 };
 
 helper get_user => sub {
   my $c = shift;
-  my ($user_id) = @_; # the email address used as the user_id by oauth
+  my ($user_id) = @_;
   # id: The ID of the account
   # username: The username of the account
   # acct: Equals username for local users, includes @domain for remote ones
@@ -132,11 +136,11 @@ helper get_user => sub {
   # avatar_static: URL to the avatar static image (gif)
   # header: URL to the header image
   # header_static: URL to the header static image (gif)
-  my $sth = eval { $c->db->prepare('SELECT id, username FROM users WHERE email = ?') } || $log->fatal("Cannot select user from database");
+  my $sth = eval { $c->db->prepare('SELECT username FROM users WHERE id = ?') } || $log->fatal("Cannot select user from database");
   $sth->execute($user_id);
-  my ($id, $username) = $sth->fetchrow_array;
+  my ($username) = $sth->fetchrow_array;
   my $user = {};
-  $user->{id} = $id;
+  $user->{id} = $user_id;
   $user->{username} = $username if $username;
   return $user;
 };
@@ -301,7 +305,8 @@ my $verify_client_sub = sub { #FIXME
   return ( 0,'unauthorized_client2' );
 };
 
-my $store_auth_code_sub = sub { #FIXME
+my $store_auth_code_sub = sub {
+  die("store_auth_code_sub not implemented"); # FIXME
   $log->debug('store_auth_code_sub');
   my ( %args ) = @_;
 
@@ -323,6 +328,7 @@ my $store_auth_code_sub = sub { #FIXME
 };
   
 my $verify_auth_code_sub = sub { #FIXME
+  die("verify_auth_code_sub not implemented"); # FIXME
   $log->debug('verify_auth_code_sub');
   my ( %args ) = @_;
 
@@ -389,7 +395,10 @@ my $store_access_token_sub = sub {
     # need to revoke the access token
     $c->remove_access_token($prev_at->{access_token});
   } else {
-    $user_id = $c->get_auth_code($auth_code)->{user_id};
+    # FIXME: auth_code is not being used
+    # $user_id = $c->get_auth_code($auth_code)->{user_id};
+    # rely on user_id determined by verify_user_password_sub calling verify_user
+    $user_id = $c->stash('user_id');
   }
   # $client is now a client_id!
   if (ref($client)) {
